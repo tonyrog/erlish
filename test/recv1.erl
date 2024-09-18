@@ -9,8 +9,7 @@
 
 -compile({parse_transform, erlish_t}).
 -export([example1a/1]).
--export([test1/0]).
--export([test1_/0]).
+-export([test/0]).
 
 -record(state, 
 	{
@@ -29,7 +28,7 @@ example1a(S) ->
 
 %% test
 
-test1() ->
+test() ->
     Pid = spawn(fun() -> example1a(#state{a=3,b=3,c=3}) end),
     Pid ! {y,3}, 
     erlish_api:signal(Pid, {put,foo,100}),

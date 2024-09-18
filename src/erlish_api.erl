@@ -10,27 +10,54 @@
 
 -export([handle_signal/3]).  %% default signal handler
 
+-define(CALL_TIMEOUT, 3000).
+-define(SIGNAL_TIMEOUT, 1000).
+
 call(Pid, F, As) ->
+    Mod = caller(),  %% ?or transform? module of "server" calling (if any)
+    io:format("call from ~p\n", [Mod]),
     Ref = make_ref(),
     From = [self()|Ref],
     Pid ! {'$call', From, F, As},
-    receive
-	{Ref, Value} -> Value
+    case 'receive'(Mod,
+		   fun(Mesg) ->
+			   case Mesg of
+			       {'$call', _From, _F, _As} -> {0, Mesg};
+			       {Ref, _Value} -> {1, Mesg};
+			       _ -> nomatch
+			   end
+		   end, ?CALL_TIMEOUT) of
+	{1, {_, Value}} ->
+	    Value;
+	timeout ->
+	    {error, timeout}
     end.
 
 signal(Pid, Signal) ->
+    Mod = caller(),  %% ?or transform?
+    io:format("signal from ~p\n", [Mod]),
     Ref = make_ref(),
     From = [self()|Ref],
     Pid ! {'$signal', From, Signal},
-    receive
-	{Ref, Value} -> Value
+    case 'receive'(Mod,
+		   fun(Mesg) ->
+			   case Mesg of
+			       {'$call', _From, _F, _As} -> {0, Mesg};
+			       {Ref, _Value} -> {1, Mesg};
+			       _ -> nomatch
+			   end
+		   end, ?SIGNAL_TIMEOUT) of
+	{1, {_, Value}} -> 
+	    Value;
+	timeout ->
+	    {error, timeout}
     end.
 
 reply([Pid|Ref], Value) ->
     Pid ! {Ref, Value}.
 
-
 'receive'(Mod, Fun, Timeout) ->
+    process_signals(Mod),
     case erlish_s:'receive'(Fun, Timeout) of
 	{0, {'$call', From, F, As}} ->
 	    ok = handle_call(Mod, From, F, As),
@@ -38,6 +65,26 @@ reply([Pid|Ref], Value) ->
 	Head ->
 	    Head
     end.
+
+process_signals(Mod) ->
+    receive
+	{'$signal', From, Request} ->
+	    handle_signal(Mod, From, Request),
+	    process_signals(Mod)
+    after 0 ->
+	    ok
+    end.
+
+%% caller to erlish_api 
+caller() ->
+    try throw(stk)
+    catch
+	throw:stk:Stack ->
+	    %% io:format("Stack: ~p~n", [Stack]),
+	    [_,_,{M,_F,_Arity,_}|_] = Stack,
+	    M
+    end.
+
 
 get_state() ->
     case get('$state') of

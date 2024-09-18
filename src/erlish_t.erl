@@ -56,8 +56,9 @@ transform_recv(Ln, Clauses, Timeout, Action, S) ->
 	{clauses,
 	 [{clause,Ln,[{var,Ln,Var}],[],
 	   [{'case',Ln,{var,Ln,Var},
-	     [handle_call_clause(Var,Ln),
-	      handle_signal_clause(Ln,S)] ++  %% override ?
+	     [handle_call_clause(Var,Ln)
+	     %% ,handle_signal_clause(Ln,S)
+	     ] ++  %% override ?
 		 transform_recv_clauses(Var, 1, Clauses) ++
 		 [{clause,Ln,[{var,Ln,'_'}],[],[{atom,Ln,nomatch}]}]}]}
 	  ]}},
@@ -79,6 +80,8 @@ handle_call_clause(Var,Ln) ->
      [],
      [{tuple,Ln,[{integer,Ln,0},{var,Ln,Var}]}]}.
 
+%% Not needed right now
+-ifdef(not_used).
 handle_signal_clause(Ln,S) ->
     From = new_var("From__"),
     Request  = new_var("Request__"),
@@ -91,7 +94,7 @@ handle_signal_clause(Ln,S) ->
        {remote,Ln,{atom,Ln,erlish_api},{atom,Ln,handle_signal}},
        [{atom,Ln,Mod},{var,Ln,From},{var,Ln,Request}]},
       {atom,Ln,match}]}.
-
+-endif.
 
 transform_recv_clauses(Var, No, [{clause,Ln,Head,Guard,_Body}|Clauses]) ->
     [{clause,Ln,Head,Guard,
