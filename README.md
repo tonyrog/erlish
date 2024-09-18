@@ -1,0 +1,2 @@
+# erlish
+Nearly Erlang
