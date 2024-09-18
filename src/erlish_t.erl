@@ -56,8 +56,8 @@ transform_recv(Ln, Clauses, Timeout, Action, S) ->
 	{clauses,
 	 [{clause,Ln,[{var,Ln,Var}],[],
 	   [{'case',Ln,{var,Ln,Var},
-	     [handle_call_clause(Var,Ln)
-	     %% ,handle_signal_clause(Ln,S)
+	     [rpccall_clause(Var,Ln)
+	     %% ,signal_clause(Ln,S)
 	     ] ++  %% override ?
 		 transform_recv_clauses(Var, 1, Clauses) ++
 		 [{clause,Ln,[{var,Ln,'_'}],[],[{atom,Ln,nomatch}]}]}]}
@@ -69,20 +69,20 @@ transform_recv(Ln, Clauses, Timeout, Action, S) ->
 	 end
     }.
 
-handle_call_clause(Var,Ln) ->
+rpccall_clause(Var,Ln) ->
     From = new_var("_From__"),
     Func  = new_var("_Func__"),
     Args  = new_var("_Args__"),
     {clause,Ln,
      [{tuple,Ln,
-       [{atom,Ln,'$call'},{var,Ln,From},
+       [{atom,Ln,'$rpccall'},{var,Ln,From},
 	{var,Ln,Func},{var,Ln,Args}]}],
      [],
      [{tuple,Ln,[{integer,Ln,0},{var,Ln,Var}]}]}.
 
 %% Not needed right now
 -ifdef(not_used).
-handle_signal_clause(Ln,S) ->
+signal_clause(Ln,S) ->
     From = new_var("From__"),
     Request  = new_var("Request__"),
     Mod = maps:get(module, S),

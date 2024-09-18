@@ -2,7 +2,8 @@
 
 -module(erlish_api).
 
--export([call/3]).
+-export([call/2, reply/2]).
+-export([rpc/3]).
 -export([signal/2]).
 -export(['receive'/3]).  %% called from parse transform
 -export([get_state/0]).
@@ -10,39 +11,39 @@
 
 -export([handle_signal/3]).  %% default signal handler
 
--define(CALL_TIMEOUT, 3000).
+-define(RPC_TIMEOUT, 3000).
 -define(SIGNAL_TIMEOUT, 1000).
 
-call(Pid, F, As) ->
+rpc(ServerRef, F, As) when is_pid(ServerRef); is_atom(ServerRef) ->
     Mod = caller(),  %% ?or transform? module of "server" calling (if any)
-    io:format("call from ~p\n", [Mod]),
-    Ref = make_ref(),
+    io:format("rpc from ~p\n", [Mod]),
+    Ref = make_ref(),  %% monitor!
     From = [self()|Ref],
-    Pid ! {'$call', From, F, As},
+    ServerRef ! {'$rpccall', From, F, As},
     case 'receive'(Mod,
 		   fun(Mesg) ->
 			   case Mesg of
-			       {'$call', _From, _F, _As} -> {0, Mesg};
+			       {'$rpccall', _From, _F, _As} -> {0, Mesg};
 			       {Ref, _Value} -> {1, Mesg};
 			       _ -> nomatch
 			   end
-		   end, ?CALL_TIMEOUT) of
+		   end, ?RPC_TIMEOUT) of
 	{1, {_, Value}} ->
 	    Value;
 	timeout ->
 	    {error, timeout}
     end.
 
-signal(Pid, Signal) ->
+signal(ServerRef, Signal) when is_pid(ServerRef); is_atom(ServerRef) ->
     Mod = caller(),  %% ?or transform?
     io:format("signal from ~p\n", [Mod]),
-    Ref = make_ref(),
+    Ref = make_ref(),  %% monitor!
     From = [self()|Ref],
-    Pid ! {'$signal', From, Signal},
+    ServerRef ! {'$signal', From, Signal},
     case 'receive'(Mod,
 		   fun(Mesg) ->
 			   case Mesg of
-			       {'$call', _From, _F, _As} -> {0, Mesg};
+			       {'$rpccall', _From, _F, _As} -> {0, Mesg};
 			       {Ref, _Value} -> {1, Mesg};
 			       _ -> nomatch
 			   end
@@ -53,14 +54,22 @@ signal(Pid, Signal) ->
 	    {error, timeout}
     end.
 
+call(ServerRef, Call) when is_atom(ServerRef); is_pid(ServerRef) ->
+    Ref = make_ref(),
+    From = [self()|Ref],
+    ServerRef ! {call, From, Call},
+    receive
+	{Ref, Value} -> Value
+    end.
+
 reply([Pid|Ref], Value) ->
     Pid ! {Ref, Value}.
 
 'receive'(Mod, Fun, Timeout) ->
     process_signals(Mod),
     case erlish_s:'receive'(Fun, Timeout) of
-	{0, {'$call', From, F, As}} ->
-	    ok = handle_call(Mod, From, F, As),
+	{0, {'$rpccall', From, F, As}} ->
+	    ok = handle_rpc(Mod, From, F, As),
 	    'receive'(Mod, Fun, Timeout);
 	Head ->
 	    Head
@@ -75,12 +84,12 @@ process_signals(Mod) ->
 	    ok
     end.
 
-%% caller to erlish_api 
+%% caller module to erlish_api 
 caller() ->
     try throw(stk)
     catch
 	throw:stk:Stack ->
-	    %% io:format("Stack: ~p~n", [Stack]),
+	    io:format("Stack: ~p~n", [Stack]),
 	    [_,_,{M,_F,_Arity,_}|_] = Stack,
 	    M
     end.
@@ -94,16 +103,23 @@ get_state() ->
 
 put_state(S) ->
     put('$state', S).
+
+get_api(Mod) ->
+    try Mod:api() of
+	Api -> Api
+    catch
+	error:undef -> #{}
+    end.
 		      
-handle_call(Mod, From, F, As) ->
+handle_rpc(Mod, From, F, As) ->
     S = get_state(),
-    S1 = handle_call(Mod, From, F, As, S),
+    S1 = handle_rpc(Mod, From, F, As, S),
     put_state(S1),
     ok.
 
-handle_call(Mod, From, F, As, S) ->
-    io:format("got call ~w, ~w, ~w\n", [From, F, As]),
-    case maps:get(F, Mod:api(), undefined) of
+handle_rpc(Mod, From, F, As, S) ->
+    io:format("got rpc ~w, ~w, ~w\n", [From, F, As]),
+    case maps:get(F, get_api(Mod), undefined) of
 	undefined -> 
 	    io:format("unknown function ~w~n", [F]),
 	    reply(From, {error, undef}),

@@ -16,25 +16,16 @@
 -export([foo/2]).
 -export([bar/2]).
 
--define(reply(From, Value), hd(From) ! {tl(From),Value}).
--define(call(Pid, F, As),
-	hd([begin From = [self()|Ref],
-		  Pid ! {signal, From, {'$call', F, As}},
-		  receive
-		      {Ref, Value} -> Value
-		  end
-	    end || Ref <- [make_ref()]])).
-
 api() ->
     #{ foo => fun foo_/2, 
        bar => fun bar_/2
      }.
 
 foo(Pid, A) ->
-    ?call(Pid, foo, [A]).
+    erlish_api:rpc(Pid, foo, [A]).
 
 bar(Pid, B) -> 
-    ?call(Pid, bar, [B]).
+    erlish_api:rpc(Pid, bar, [B]).
 
 start() ->
     spawn(fun() -> server_loop() end).
@@ -58,7 +49,7 @@ test() ->
     Pid2 = start(),
     spawn(fun() -> 
 		  timer:sleep(1000),
-		  recv_api:signal(Pid1, {process_info, message_queue_len})
+		  erlish_api:signal(Pid1, {process_info, message_queue_len})
 	  end),
     Value = foo(Pid1, Pid2),
     Pid1 ! stop,

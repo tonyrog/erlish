@@ -31,11 +31,11 @@ loop() ->
     end.
 
 init(Pid) ->
-    erlish_api:call(Pid, init, []).
+    erlish_api:rpc(Pid, init, []).
 add(Pid,Value) ->
-    erlish_api:call(Pid, add, [Value]).
+    erlish_api:rpc(Pid, add, [Value]).
 print(Pid) ->
-    erlish_api:call(Pid, print, []).
+    erlish_api:rpc(Pid, print, []).
 stop(Pid) ->
     Pid ! stop.
 

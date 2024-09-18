@@ -13,16 +13,22 @@
 
 -export([api/0]).
 
--export([set_/3]).
--export([get_/2]).
--export([f_/3]).
--export([g_/3]).
-
--define(reply(From, Value), hd(From) ! {tl(From),Value}).
+-rpc([set_/3, get_/2, r_/3, g_/3]).
 
 start() ->
     spawn(fun() -> server_loop(#{}) end).
 
+%% client API
+set(ServerRef, Key, Value) -> 
+    erlish_api:rpc(ServerRef, set, [Key, Value]).
+get(ServerRef, Key) ->
+    erlish_api:rpc(ServerRef, get, [Key]).
+f(ServerRef, A, B) ->
+    erlish_api:rpc(ServerRef, f, [A, B]).
+g(ServerRef, A, B) ->
+    erlish_api:rpc(ServerRef, g, [A, B]).
+
+%% RPC API functions
 api() ->
 	#{
 	  set => fun set_/3,
@@ -31,14 +37,12 @@ api() ->
 	  g => fun g_/3
 	 }.
 
-set(ServerRef, Key, Value) -> 
-    erlish_api:call(ServerRef, set, [Key, Value]).
-get(ServerRef, Key) ->
-    erlish_api:call(ServerRef, get, [Key]).
-f(ServerRef, A, B) ->
-    erlish_api:call(ServerRef, f, [A, B]).
-g(ServerRef, A, B) ->
-    erlish_api:call(ServerRef, g, [A, B]).
+%% local functions
+set_(S, Key, Value) -> {reply, ok, S#{ Key=>Value }}.
+get_(S, Key) -> {reply, maps:get(Key, S, undefined), S}.
+f_(S, A, B) -> {reply, A + B, S}.
+g_(S, A, B) -> {reply, A * B, S}.
+
 
 server_loop(Opts) ->
     io:format("S = ~p\n", [erlish_api:get_state()]),
@@ -56,11 +60,6 @@ server_loop(Opts) ->
 	    server_loop(Opts)	    
     end.
 
-%% local functions
-set_(S, Key, Value) -> {reply, ok, S#{ Key=>Value }}.
-get_(S, Key) -> {reply, maps:get(Key, S, undefined), S}.
-f_(S, A, B) -> {reply, A + B, S}.
-g_(S, A, B) -> {reply, A * B, S}.
 
 test() ->
     Pid = start(),
