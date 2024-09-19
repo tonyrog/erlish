@@ -51,9 +51,16 @@ test() ->
     Pid2 = start(),
     spawn(fun() -> 
 		  timer:sleep(1000),
-		  erlish_api:signal(Pid1, {process_info, message_queue_len})
+		  L1 = erlish_api:signal(Pid1,{process_info,message_queue_len}),
+		  io:format("Pid1 message queue length ~p\n", [L1]),
+		  L2= erlish_api:signal(Pid2,{process_info,message_queue_len}),
+		  io:format("Pid2 message queue length ~p\n", [L2]),
+		  ok
 	  end),
     Value = foo(Pid1, Pid2),
+    Pid1 ! a, Pid1 ! b, Pid1 ! c,
+    Pid2 ! a, Pid2 ! b, Pid2 ! c,
+    timer:sleep(1500),
     Pid1 ! stop,
     Pid2 ! stop,
     Value.

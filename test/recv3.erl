@@ -45,15 +45,15 @@ g_(S, A, B) -> {reply, A * B, S}.
 
 
 server_loop(Opts) ->
-    io:format("S = ~p\n", [erlish_api:get_state()]),
+    io:format("SERVER_LOOP: S = ~p\n", [erlish_api:get_state()]),
     receive
 	next -> 
-	    erlang:display(next),
+	    io:format("  NEXT\n"),
 	    ok
     end,
     receive
 	{cudle, Pid} ->
-	    erlang:display(cudle),
+	    io:format("  CUDLE\n"),
 	    Pid ! gully,
 	    server_loop(Opts)
     after 0 ->
@@ -82,18 +82,25 @@ test() ->
 
     erlish_api:signal(Pid, {poke, hello, 123}),
 
-    Value1 = erlish_api:signal(Pid, {process_info, registered_name}),
-    io:format("process_info(~w, registered_name) = ~p~n", [Pid,Value1]),
-    Value2 = erlish_api:signal(Pid, {register, xyz}),
-    io:format("register(~w, xyz) = ~p~n", [Pid,Value2]),
+    case erlish_api:signal(Pid, {process_info, registered_name}) of
+	[] ->
+	    true = erlish_api:signal(Pid, {register, xyz});
+	xyz ->
+	    true
+    end,
 
     Pid ! {cudle, self()},
-    io:format("get(foo) = ~p~n", [get(xyz, foo)]),
+    io:format("get(xyz, foo) = ~p~n", [get(xyz, foo)]),
     Pid ! next,
+	    
+    Value2 = erlish_api:signal(Pid, {unregister, xyz}),
+    io:format("unregister(xyz) = ~p~n", [Value2]),
 
     receive
 	gully -> 
 	    io:format("got gully\n")
+    after 1000 ->
+	    io:format("no gully\n")
     end,
     ok.
     

@@ -13,11 +13,14 @@
 	}).
 
 example1b(S) ->
-    erlang:display({enter_example1b, S}),
+    io:format("example1b: ~p\n", [S]),
     receive
-	{x, A} when A > S#state.a -> example1b(S#state{a=A,b=S#state.b-1});
-	{y, B} when B > S#state.b -> example1b(S#state{b=2*B})
-    after 1000 -> S
+	{x, A} when A > S#state.a ->
+	    example1b(S#state{a=A,b=S#state.b-1});
+	{y, B} when B > S#state.b ->
+	    example1b(S#state{b=2*B})
+    after 1000 -> 
+	    S
     end.
 
 test() ->
@@ -26,4 +29,3 @@ test() ->
     erlish_api:signal(Pid, {poke,foo,100}),
     Pid  ! {x,4},
     ok.
-

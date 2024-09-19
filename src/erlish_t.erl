@@ -57,7 +57,7 @@ transform_recv(Ln, Clauses, Timeout, Action, S) ->
 	 [{clause,Ln,[{var,Ln,Var}],[],
 	   [{'case',Ln,{var,Ln,Var},
 	     [rpccall_clause(Var,Ln)
-	     %% ,signal_clause(Ln,S)
+	     ,signal_clause(Var,Ln)
 	     ] ++  %% override ?
 		 transform_recv_clauses(Var, 1, Clauses) ++
 		 [{clause,Ln,[{var,Ln,'_'}],[],[{atom,Ln,nomatch}]}]}]}
@@ -80,21 +80,14 @@ rpccall_clause(Var,Ln) ->
      [],
      [{tuple,Ln,[{integer,Ln,0},{var,Ln,Var}]}]}.
 
-%% Not needed right now
--ifdef(not_used).
-signal_clause(Ln,S) ->
-    From = new_var("From__"),
-    Request  = new_var("Request__"),
-    Mod = maps:get(module, S),
+signal_clause(Var,Ln) ->
+    From = new_var("_From__"),
+    Request  = new_var("_Request__"),
     {clause,Ln,
      [{tuple,Ln,
        [{atom,Ln,'$signal'},{var,Ln,From},{var,Ln,Request}]}],
      [],
-     [{call,Ln,
-       {remote,Ln,{atom,Ln,erlish_api},{atom,Ln,handle_signal}},
-       [{atom,Ln,Mod},{var,Ln,From},{var,Ln,Request}]},
-      {atom,Ln,match}]}.
--endif.
+     [{tuple,Ln,[{integer,Ln,-1},{var,Ln,Var}]}]}.
 
 transform_recv_clauses(Var, No, [{clause,Ln,Head,Guard,_Body}|Clauses]) ->
     [{clause,Ln,Head,Guard,

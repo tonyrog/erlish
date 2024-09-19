@@ -3,97 +3,123 @@
 -module(erlish_api).
 
 -export([call/2, reply/2]).
--export([rpc/3]).
+-export([rpc/3, rpc/4]).
 -export([signal/2]).
 -export(['receive'/3]).  %% called from parse transform
 -export([get_state/0]).
 -export([put_state/1]).
 
 -export([handle_signal/3]).  %% default signal handler
+%% debug
+-export([caller/0]).
 
+-define(dbg(F,A), io:format("~p: " F "\n", [self() | (A)])).
 -define(RPC_TIMEOUT, 3000).
--define(SIGNAL_TIMEOUT, 1000).
+-define(SIGNAL_TIMEOUT, 3000).
 
-rpc(ServerRef, F, As) when is_pid(ServerRef); is_atom(ServerRef) ->
+rpc(ServerRef, F, As) ->
+    rpc(ServerRef, F, As, ?RPC_TIMEOUT).
+
+rpc(ServerRef, F, As, Timeout) when is_pid(ServerRef); is_atom(ServerRef) ->
     Mod = caller(),  %% ?or transform? module of "server" calling (if any)
-    io:format("rpc from ~p\n", [Mod]),
-    Ref = make_ref(),  %% monitor!
-    From = [self()|Ref],
-    ServerRef ! {'$rpccall', From, F, As},
+    MRef = erlang:monitor(process, ServerRef),
+    ?dbg("RPC CALL ~p ~w to ~p from ~p, ref=~p", [F, As, ServerRef, Mod, MRef]),
+    ServerRef ! {'$rpccall', {self(),MRef}, F, As},
     case 'receive'(Mod,
 		   fun(Mesg) ->
 			   case Mesg of
 			       {'$rpccall', _From, _F, _As} -> {0, Mesg};
-			       {Ref, _Value} -> {1, Mesg};
+			       {MRef, _Value} -> {1, Mesg};
+			       {'DOWN', MRef, _, _, _Reason} -> {2,Mesg};
 			       _ -> nomatch
 			   end
-		   end, ?RPC_TIMEOUT) of
+		   end, Timeout) of
 	{1, {_, Value}} ->
+            erlang:demonitor(MRef, [flush]),
 	    Value;
+	{2, {_, _, _, _, Reason}} ->
+	    exit(Reason);
 	timeout ->
 	    {error, timeout}
     end.
 
-signal(ServerRef, Signal) when is_pid(ServerRef); is_atom(ServerRef) ->
+signal(ServerRef, Request) when is_pid(ServerRef); is_atom(ServerRef) ->
     Mod = caller(),  %% ?or transform?
-    io:format("signal from ~p\n", [Mod]),
-    Ref = make_ref(),  %% monitor!
-    From = [self()|Ref],
-    ServerRef ! {'$signal', From, Signal},
+    MRef = erlang:monitor(process, ServerRef),
+    ?dbg("SEND signal ~p to ~p from ~p, ref=~p", [Request,ServerRef,Mod,MRef]),
+    ServerRef ! {'$signal',{self(),MRef},Request},
     case 'receive'(Mod,
 		   fun(Mesg) ->
 			   case Mesg of
 			       {'$rpccall', _From, _F, _As} -> {0, Mesg};
-			       {Ref, _Value} -> {1, Mesg};
+			       {MRef, _Value} -> {1, Mesg};
+			       {'DOWN', MRef, _, _, _Reason} -> {2,Mesg};
 			       _ -> nomatch
 			   end
 		   end, ?SIGNAL_TIMEOUT) of
 	{1, {_, Value}} -> 
+            erlang:demonitor(MRef, [flush]),
 	    Value;
+	{2, {_, _, _, _, Reason}} ->
+	    exit(Reason);
 	timeout ->
 	    {error, timeout}
     end.
 
 call(ServerRef, Call) when is_atom(ServerRef); is_pid(ServerRef) ->
-    Ref = make_ref(),
-    From = [self()|Ref],
-    ServerRef ! {call, From, Call},
+    MRef = erlang:monitor(process, ServerRef),
+    ?dbg("CALL ~p to ~p, ref=~p", [Call,ServerRef,MRef]),
+    ServerRef ! {call,{self(),MRef}, Call},
     receive
-	{Ref, Value} -> Value
+	{MRef, Reply} -> 
+            erlang:demonitor(MRef, [flush]),
+	    Reply;
+	{'DOWN', MRef, _, _, Reason} ->
+	    exit(Reason)
     end.
 
-reply([Pid|Ref], Value) ->
+reply({Pid,Ref}, Value) ->
     Pid ! {Ref, Value}.
 
 'receive'(Mod, Fun, Timeout) ->
-    process_signals(Mod),
-    case erlish_s:'receive'(Fun, Timeout) of
+    ?dbg("RECEIVE(~p ~p ~p)", [Mod, Fun, Timeout]),
+    case prim_eval:'receive'(Fun, Timeout) of
 	{0, {'$rpccall', From, F, As}} ->
 	    ok = handle_rpc(Mod, From, F, As),
+	    %% fixme! update timeout if != infinity
 	    'receive'(Mod, Fun, Timeout);
+	{-1, {'$signal', From, Request}} ->
+	    try handle_signal(Mod, From, Request) of
+		_Result ->
+		    %% fixme! update timeout if != infinity
+		    'receive'(Mod, Fun, Timeout)
+	    catch
+		error:Reason:Stack ->
+		    reply(From, {error, Reason}), %% possible double reply?
+		    io:format("signal crash: ~p~n", [Reason]),
+		    io:format("Stack:\n~p\n", [Stack]),
+		    'receive'(Mod, Fun, Timeout)
+	    end;
 	Head ->
+	    ?dbg("RECEIVE MATCHED ~p", [Head]),
 	    Head
     end.
 
-process_signals(Mod) ->
-    receive
-	{'$signal', From, Request} ->
-	    handle_signal(Mod, From, Request),
-	    process_signals(Mod)
-    after 0 ->
-	    ok
-    end.
 
 %% caller module to erlish_api 
 caller() ->
-    try throw(stk)
+    try caller_stk()
     catch
 	throw:stk:Stack ->
-	    io:format("Stack: ~p~n", [Stack]),
-	    [_,_,{M,_F,_Arity,_}|_] = Stack,
-	    M
+	    %% io:format("Stack: ~p~n", [Stack]),
+	    case Stack of
+		[_,_,_,{M,_F,_Arity,_}|_] -> M;
+		_ -> undefined
+	    end
     end.
 
+caller_stk() ->
+    throw(stk).
 
 get_state() ->
     case get('$state') of
@@ -104,6 +130,7 @@ get_state() ->
 put_state(S) ->
     put('$state', S).
 
+get_api(undefined) -> #{};
 get_api(Mod) ->
     try Mod:api() of
 	Api -> Api
@@ -118,7 +145,7 @@ handle_rpc(Mod, From, F, As) ->
     ok.
 
 handle_rpc(Mod, From, F, As, S) ->
-    io:format("got rpc ~w, ~w, ~w\n", [From, F, As]),
+    ?dbg("HANDLE_RPC(mod=~w,from=~w,f=~w,as=~w)", [Mod,From,F,As]),
     case maps:get(F, get_api(Mod), undefined) of
 	undefined -> 
 	    io:format("unknown function ~w~n", [F]),
@@ -151,7 +178,7 @@ handle_rpc(Mod, From, F, As, S) ->
 %% link/monitor/flags (no receive is allowed)
 handle_signal(_Mod, From, Request) ->
     %% fixme check if Mod has an override!
-    erlang:display({handle_signal,Request}),
+    ?dbg("HANDLE_SIGNAL(mod=~p,from=~w,rquest=~p", [_Mod,From,Request]),
     case Request of
 	{process_info, Item} ->
 	    reply(From, erlang:process_info(self(), Item));
@@ -165,6 +192,9 @@ handle_signal(_Mod, From, Request) ->
 	    reply(From, erlang:get(Key));
 	{register, Name} ->
 	    reply(From, erlang:register(Name, self()));
-	_ -> 
+	{unregister, Name} ->
+	    reply(From, erlang:unregister(Name));
+	_ ->
+	    reply(From, {error, unknown}),
 	    ok
     end.
